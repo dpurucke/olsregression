@@ -1,0 +1,52 @@
+---
+title: "OLS Regression Project"
+author: "Your Name"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+load("input/addhealthwweights.RData")
+if(!require(stargazer)) {
+  install.packages("stargazer")
+}
+```
+
+## Section Header
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document.
+
+Here is an embedded code chunk for stargazer output in pdf form:
+
+```{r stargazer_example, results="asis", echo=FALSE, error=FALSE, message=FALSE}
+model.gpa <- lm(indegree~I(pseudoGPA-2), data=addhealth)
+model.honor <- lm(indegree~honorsociety, data=addhealth)
+model.both <- update(model.gpa, .~.+honorsociety)
+
+#calculate and add BIC
+bic.null <- function(model) {
+  rsq <- summary(model)$r.squared
+  n <- length(model$resid)
+  p <- length(model$coef)-1
+  return(n*log(1-rsq)+p*log(n))
+}
+bics <- round(sapply(list(model.gpa, model.honor, model.both), bic.null),1)
+
+stargazer(model.gpa, model.honor, model.both, 
+          type="latex",
+          keep.stat=c("n","adj.rsq"), style="demography",
+          covariate.labels = c("pseudo-GPA (centered on 2.0)","honor society member"),
+          add.lines = list(c("BIC'", bics)),
+          dep.var.labels = "number of friend nominations", header = FALSE,
+          title="OLS regression models predicting number of friend nominations by academic achievement")
+```
+
+Here is an embedded code chunk for a nice figure with captions: 
+
+```{r figure_example, echo=FALSE, fig.cap="A Lovely Caption Goes Here"}
+boxplot(indegree~nsports, data=addhealth, las=1, 
+        col="skyblue", xlab="Number of sports played",
+        ylab="Number of friend nominations")
+```
