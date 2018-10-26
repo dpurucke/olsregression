@@ -1,6 +1,6 @@
 ---
 title: "OLS Regression Project"
-author: "Your Name"
+author: "David Purucker"
 output: pdf_document
 ---
 
@@ -11,21 +11,64 @@ if(!require(stargazer)) {
   install.packages("stargazer")
 }
 ```
-
-## Section Header
+## Introduction
 
 This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document.
 
-Here is an embedded code chunk for stargazer output in pdf form:
+## Download packages
+```{r stargazer_example, results="asis", echo=FALSE, error=FALSE, message=FALSE, include=FALSE}
+install.packages("mice")
+library(mice)
+install.packages("car")
+library(car)
+install.packages("survey")
+library(survey)
+install.packages("texreg")
+library(texreg)
+```
+## exploratory models?
 
-```{r stargazer_example, results="asis", echo=FALSE, error=FALSE, message=FALSE}
+## Multiple imputation (chained equations) to correct for missing observations, to create "addhealth.chainedequations(CE)"
+```{r chainedequations, include=FALSE}
+imputed <- mice(addhealth[,c("indegree","race","sex","grade","pseudoGPA","honorsociety",
+ "alcoholuse","smoker","bandchoir","academicclub","nsports",
+ "parentinc", "cluster", "sweight")], m=5, print=FALSE)
+addhealth.ce <- complete(imputed, 5)
+```
+## check for imputed data
+```{r missing value check, include=FALSE}
+apply(is.na(addhealth.ce), 2, sum)
+```
+```
+for(i in 1:5){
+imputations <- complete(imputed, i)
+imputations.svy <- svyglm(indegree~nsports, design=imputations)
+summary(imputations.svy)
+}
+## Models
+```{}
 model.gpa <- lm(indegree~I(pseudoGPA-2), data=addhealth)
 model.honor <- lm(indegree~honorsociety, data=addhealth)
 model.both <- update(model.gpa, .~.+honorsociety)
+```
+```{}
+## Account for survey design effects
+addhealth.svy <- svydesign(ids=~cluster, weight=~sweight, data=addhealth)
+model.svy <- svyglm(indegree~nsports, design=addhealth.svy)
+summary(model.svy)$coef
+```
+
+##test for multicollinearity with VIF
+
+```
+
+
+
 
 #calculate and add BIC
+```{}
 bic.null <- function(model) {
   rsq <- summary(model)$r.squared
   n <- length(model$resid)
@@ -43,10 +86,11 @@ stargazer(model.gpa, model.honor, model.both,
           title="OLS regression models predicting number of friend nominations by academic achievement")
 ```
 
-Here is an embedded code chunk for a nice figure with captions: 
 
 ```{r figure_example, echo=FALSE, fig.cap="A Lovely Caption Goes Here"}
 boxplot(indegree~nsports, data=addhealth, las=1, 
         col="skyblue", xlab="Number of sports played",
         ylab="Number of friend nominations")
 ```
+
+
