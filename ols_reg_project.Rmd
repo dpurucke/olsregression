@@ -4,87 +4,134 @@ author: "David Purucker"
 output: pdf_document
 ---
 
-```{r setup, include=FALSE}
+```{r Setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 load("input/addhealthwweights.RData")
 if(!require(stargazer)) {
   install.packages("stargazer")
 }
 ```
-## Introduction
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r Introduction, include=FALSE}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document.
+```
 
-## Download packages
+
 ```{r stargazer_example, results="asis", echo=FALSE, error=FALSE, message=FALSE, include=FALSE}
-install.packages("mice")
+library(stargazer)
 library(mice)
-install.packages("car")
 library(car)
-install.packages("survey")
 library(survey)
-install.packages("texreg")
 library(texreg)
 ```
-## exploratory models?
+```{r Testing for Heteroscedasticity, echo=FALSE, message=FALSE, warning=FALSE}
+model.explore1 <- lm(indegree~pseudoGPA, data=addhealth)
+model.explore2 <- lm(indegree~honorsociety, data=addhealth)
+plot(model.explore1$fitted.values, model.explore1$residuals, xlab="Fitted Values", ylab="Residuals")
+plot(model.explore2$fitted.values, model.explore2$residuals, xlab="Fitted Values", ylab="Residuals")
 
-## Multiple imputation (chained equations) to correct for missing observations, to create "addhealth.chainedequations(CE)"
-```{r chainedequations, include=FALSE}
-imputed <- mice(addhealth[,c("indegree","race","sex","grade","pseudoGPA","honorsociety",
- "alcoholuse","smoker","bandchoir","academicclub","nsports",
- "parentinc", "cluster", "sweight")], m=5, print=FALSE)
-addhealth.ce <- complete(imputed, 5)
+The plots do not show evidence of much heteroscedasticity in the relationship between in-degree and GPA and in-degree and honor society membership. Heteroscedasticity indicates that the variance of the residuals is not constant but is instead dependent on the values of x. A cone-shaped relationship between the fitted values and residuals would indicate a problem with heteroscedasticity. There is some heteroscedasticity in the linear model relationship between in-degree and GPA. Heteroscedasticity will produce a somewhat inefficient estimate of regression coefficients.
 ```
-## check for imputed data
-```{r missing value check, include=FALSE}
-apply(is.na(addhealth.ce), 2, sum)
+
+```{r Testing for VIF, echo=FALSE, message=FALSE, warning=FALSE}
+model.vif <- lm(indegree~pseudoGPA+honorsociety+nsports+race+sex+grade+alcoholuse+smoker+bandchoir+academicclub+parentinc, data=addhealth)
+vif(model.vif)
+
+VIF (variance inflation factor) applied to a test model with all variables shows low values for all the variables in this dataset. All VIF values are well below 4, indicating that there is no problem with multicollinearity between these variables.
 ```
+```{r Cube root transformation}
+addhealth$inc.cuberoot = addhealth$parentinc^(1/3)
 ```
-for(i in 1:5){
-imputations <- complete(imputed, i)
-imputations.svy <- svyglm(indegree~nsports, design=imputations)
-summary(imputations.svy)
+Because some values for parental income are marked as 0, I apply a cube-root transformation.
+
+``` {r Survey design}
+lm_svy_mi <- function(formula, imputations) {
+  
+  #setting up null objects allows us to easily add results
+  #later
+  b <- se <- R2 <- NULL
+  
+  #now loop through our imputations and run the model
+  for(i in 1:imputations$m) {
+    #grab the complete dataset
+    imputation <- complete(imputations, i)
+    #create the design effect object
+    imputation.svy <- svydesign(ids=~cluster, weight=~sweight,
+                                data=imputation) 
+    #run the model
+    model <- svyglm(formula, design=imputation.svy)
+    #collect the results
+    b <- cbind(b, coef(model))
+    se <- cbind(se, summary(model)$coef[,2])
+    #We should get R squared too. Sadly, svyglm won't give
+    #it to us by default, but we can get it from some of the 
+    #slots in the model output
+    SSR <- sum((model$residuals)^2)
+    SSY <- sum((model$y-mean(model$y))^2)
+    R2 <- c(R2,1-SSR/SSY)
+  }
+  
+  #now pool the results
+  b.pool <- apply(b, 1, mean)
+  between.var <- apply(b, 1, var)
+  within.var <- apply(se^2, 1, mean)
+  se.pool <- sqrt(within.var+between.var+between.var/imputations$m) 
+  t.pool <- b.pool/se.pool 
+  pvalue.pool <- (1-pnorm(abs(t.pool)))*2 
+  coefficients <- data.frame(b.pool, se.pool, t.pool, pvalue.pool)
+  
+  #lets take the mean R2 value
+  r.squared <- mean(R2)
+  #we can also grap n and p from the last model since 
+  #they should be the same across all iterations
+  n <- nobs(model)
+  p <- length(model$coefficients)-1
+  #go ahead and calculate BIC.null
+  bic.null <- n*log(1-r.squared)+p*log(n)
+  
+  #return everything in a list
+  return(list(coef=coefficients,
+              n=n,
+              r.squared=r.squared,
+              bic.null=bic.null))
 }
-## Models
-```{}
-model.gpa <- lm(indegree~I(pseudoGPA-2), data=addhealth)
-model.honor <- lm(indegree~honorsociety, data=addhealth)
-model.both <- update(model.gpa, .~.+honorsociety)
-```
-```{}
-## Account for survey design effects
-addhealth.svy <- svydesign(ids=~cluster, weight=~sweight, data=addhealth)
-model.svy <- svyglm(indegree~nsports, design=addhealth.svy)
-summary(model.svy)$coef
-```
-
-##test for multicollinearity with VIF
-
-```
-
-
-
-
-#calculate and add BIC
-```{}
-bic.null <- function(model) {
-  rsq <- summary(model)$r.squared
-  n <- length(model$resid)
-  p <- length(model$coef)-1
-  return(n*log(1-rsq)+p*log(n))
+convertModel <- function(model) {
+  tr <- createTexreg(
+    coef.names = rownames(model$coef), 
+    coef = model$coef$b.pool, 
+    se = model$coef$se.pool, 
+    pvalues = model$coef$pvalue.pool,
+    gof.names = c("R2","BIC (null)","N"), 
+    gof = c(model$r.squared, model$bic.null, model$n), 
+    gof.decimal = c(T,F,F)
+  )
 }
-bics <- round(sapply(list(model.gpa, model.honor, model.both), bic.null),1)
-
-stargazer(model.gpa, model.honor, model.both, 
-          type="latex",
-          keep.stat=c("n","adj.rsq"), style="demography",
-          covariate.labels = c("pseudo-GPA (centered on 2.0)","honor society member"),
-          add.lines = list(c("BIC'", bics)),
-          dep.var.labels = "number of friend nominations", header = FALSE,
-          title="OLS regression models predicting number of friend nominations by academic achievement")
 ```
+
+```{r Multiple imputation, echo=FALSE}
+imputations <- mice(addhealth, 5, printFlag=FALSE)
+```
+
+```{r Models, results="asis", echo=FALSE, error=FALSE, message=FALSE}
+# change these to focus on pseudoGPA, not income
+model1 <- lm_svy_mi(indegree~inc.cuberoot, imputations)
+model2 <- lm_svy_mi(indegree~inc.cuberoot+nsports+pseudoGPA, imputations)
+model3 <- lm_svy_mi(indegree~inc.cuberoot+nsports+pseudoGPA+honorsociety+sex, imputations)
+model4 <- lm_svy_mi(indegree~pseudoGPA, imputations)
+model5 <- lm_svy_mi(indegree~pseudoGPA+honorsociety, imputations)
+model6 <- lm_svy_mi(indegree~honorsociety, imputations)
+model7 <- lm_svy_mi(indegree~pseudoGPA+honorsociety+inc.cuberoot, imputations)
+model8 <-lm_svy_mi(indegree~pseudoGPA+honorsociety+inc.cuberoot+nsports, imputations)
+screenreg(lapply(list(model1, model2, model3, model4, model5, model6), convertModel),
+       caption="OLS regression models predicting number of friend nominations received", custom.coef.names = c("Intercept",
+                             "parental income (cube root)",
+                             "number of sports played",
+                             "pseudo-GPA",
+                             "member of honor society",
+                             "Male"),
+       caption.above = TRUE)
+```
+
 
 
 ```{r figure_example, echo=FALSE, fig.cap="A Lovely Caption Goes Here"}
@@ -93,4 +140,11 @@ boxplot(indegree~nsports, data=addhealth, las=1,
         ylab="Number of friend nominations")
 ```
 
+# findings
 
+The OLS regression models show that adolescent popularity is
+
+# evaluate each model with adjusted R^2, F statistics, and BIC
+• higher R2 good, higher F good, lower BIC good
+
+All models display negative BIC values, indicating goodness of fit for each.
