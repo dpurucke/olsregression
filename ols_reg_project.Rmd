@@ -28,6 +28,7 @@ library(texreg)
 model.explore1 <- lm(indegree~pseudoGPA, data=addhealth)
 model.explore2 <- lm(indegree~honorsociety, data=addhealth)
 plot(model.explore1$fitted.values, model.explore1$residuals, xlab="Fitted Values", ylab="Residuals")
+
 plot(model.explore2$fitted.values, model.explore2$residuals, xlab="Fitted Values", ylab="Residuals")
 
 The plots do not show evidence of much heteroscedasticity in the relationship between in-degree and GPA and in-degree and honor society membership. Heteroscedasticity indicates that the variance of the residuals is not constant but is instead dependent on the values of x. A cone-shaped relationship between the fitted values and residuals would indicate a problem with heteroscedasticity. There is some heteroscedasticity in the linear model relationship between in-degree and GPA. Heteroscedasticity will produce a somewhat inefficient estimate of regression coefficients.
@@ -39,10 +40,11 @@ vif(model.vif)
 
 VIF (variance inflation factor) applied to a test model with all variables shows low values for all the variables in this dataset. All VIF values are well below 4, indicating that there is no problem with multicollinearity between these variables.
 ```
-```{r Cube root transformation}
-addhealth$inc.cuberoot = addhealth$parentinc^(1/3)
+```{r remove zeroes in parentinc}
+addhealth$parentinc[addhealth$parentinc=="0"]=1
+
 ```
-Because some values for parental income are marked as 0, I apply a cube-root transformation.
+Because some values for parental income are marked as 0, and because parental income values increase nonlinearly, I apply a cube-root transformation.
 
 ``` {r Survey design}
 lm_svy_mi <- function(formula, imputations) {
@@ -114,21 +116,13 @@ imputations <- mice(addhealth, 5, printFlag=FALSE)
 
 ```{r Models, results="asis", echo=FALSE, error=FALSE, message=FALSE}
 # change these to focus on pseudoGPA, not income
-model1 <- lm_svy_mi(indegree~inc.cuberoot, imputations)
-model2 <- lm_svy_mi(indegree~inc.cuberoot+nsports+pseudoGPA, imputations)
-model3 <- lm_svy_mi(indegree~inc.cuberoot+nsports+pseudoGPA+honorsociety+sex, imputations)
-model4 <- lm_svy_mi(indegree~pseudoGPA, imputations)
-model5 <- lm_svy_mi(indegree~pseudoGPA+honorsociety, imputations)
-model6 <- lm_svy_mi(indegree~honorsociety, imputations)
-model7 <- lm_svy_mi(indegree~pseudoGPA+honorsociety+inc.cuberoot, imputations)
-model8 <-lm_svy_mi(indegree~pseudoGPA+honorsociety+inc.cuberoot+nsports, imputations)
-screenreg(lapply(list(model1, model2, model3, model4, model5, model6), convertModel),
-       caption="OLS regression models predicting number of friend nominations received", custom.coef.names = c("Intercept",
-                             "parental income (cube root)",
-                             "number of sports played",
-                             "pseudo-GPA",
-                             "member of honor society",
-                             "Male"),
+model1 <- lm_svy_mi(indegree~pseudoGPA, imputations)
+model2 <- lm_svy_mi(indegree~pseudoGPA+honorsociety, imputations)
+model3 <- lm_svy_mi(indegree~pseudoGPA+honorsociety+log(parentinc), imputations)
+model4 <- lm_svy_mi(indegree~log(parentinc)+nsports+pseudoGPA, imputations)
+model5 <- lm_svy_mi(indegree~log(parentinc)+nsports+pseudoGPA+honorsociety+sex, imputations)
+screenreg(lapply(list(model1, model2, model3, model4, model5), convertModel),
+       caption="OLS regression models predicting number of friend nominations received", custom.coef.names = c("Intercept","pseudo-GPA","member of honor society","parental income (logged)","number of sports played","male"),
        caption.above = TRUE)
 ```
 
