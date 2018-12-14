@@ -5,48 +5,74 @@ output: pdf_document
 ---
 
 ```{r Setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo=FALSE, error=FALSE, message=FALSE, include=FALSE)
 load("input/addhealthwweights.RData")
 if(!require(stargazer)) {
   install.packages("stargazer")
 }
 ```
 
-```{r Introduction, include=FALSE}
+# Introduction
+What is the relationships between academic achievement and popularity among adolescenets? Research shows that social popularity correlates with a mixture of positive and negative attributes for adolescents, including a higher propensity to use drugs and alcohol and to engage in petty crime (Tugend 2010). Teenage popularity also correlates with higher future earnings. Popularity could plausbily be associated with higher or lower academic achievement among adolescents. It may be the case that being more popular confers social capital that contributes to higher academic achievement - providing, for example, easy access to tutoring or mentoring, or eliciting more grading lenience from instructors. Academic achievement could itself contribute to popularity, for example, by eliciting respect from other students. On the other hand, popularity could create social pressures to avoid investing time in academics or reduce the short-term costs of lesser academic investment, or deviant behaviors associated with popularity could carry over into academic sanctions. Finally, it may be the case social popularity and academic achievement are only weakly related but are both strongly associated with a third variable, parental income. 
 
-```
+Using data from the National Longitudinal Study of Adolescent to Adult Health (Add Health), it is possible to analyze the relationship between various social and academic attributes of adolescents. This is a nationally-representative survey of high school students in grades 7-12, collected in 'waves'. This analysis uses data from the first wave, conducted in 1994-95.
+This analysis uses a simple measure of popularity, in-degree scores, which measures the number of times a student was nominated as a friend by other students in the school. In-degree scores are modeled using simple OLS regression for association with variables representing academic achievement and socioeconomic status measured in Add Health. Independent variables used in this analysis are student membership in school honor societies (a binary categorical variable), parental income (measured in thousands of dollars), extracurricular sports participation (measured by number of sports), sex (male or female), and pseudoGPA.  PseudoGPA is assessed by calculating GPA from student reports of their most recent grades in math, language arts, and science.
 
 
-```{r stargazer_example, results="asis", echo=FALSE, error=FALSE, message=FALSE, include=FALSE}
+```{r Load packages, results="asis"}
 library(stargazer)
 library(mice)
 library(car)
 library(survey)
 library(texreg)
 ```
-```{r Testing for Heteroscedasticity, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Testing for principles of OLS regression
+
+OLS regression models are subject to five common problems: heteroscedasticity, multicollinearity, missing values, design effects, and poor model selection.
+
+```{r Test for heteroscedasticity}
+lpseudoGPA <- log(addhealth$pseudoGPA)
+lindegree <- log(addhealth$indegree)
 model.explore1 <- lm(indegree~pseudoGPA, data=addhealth)
 model.explore2 <- lm(indegree~honorsociety, data=addhealth)
+
+model.explore4 <- lm(indegree~lpseudoGPA, data=addhealth)
 plot(model.explore1$fitted.values, model.explore1$residuals, xlab="Fitted Values", ylab="Residuals")
-
 plot(model.explore2$fitted.values, model.explore2$residuals, xlab="Fitted Values", ylab="Residuals")
+plot(model.explore4$fitted.values, model.explore4$residuals, xlab="Fitted Values", ylab="Residuals")
 
-The plots do not show evidence of much heteroscedasticity in the relationship between in-degree and GPA and in-degree and honor society membership. Heteroscedasticity indicates that the variance of the residuals is not constant but is instead dependent on the values of x. A cone-shaped relationship between the fitted values and residuals would indicate a problem with heteroscedasticity. There is some heteroscedasticity in the linear model relationship between in-degree and GPA. Heteroscedasticity will produce a somewhat inefficient estimate of regression coefficients.
 ```
 
-```{r Testing for VIF, echo=FALSE, message=FALSE, warning=FALSE}
+## Testing for heteroscedasticity
+Heteroscedasticity means that the variance of the residuals in a linear model is not constant as x increases. A model testing the association of GPA with in-degree shows that the dispersion of residuals increases with the fitted values, producing a cone shape. At higher predicted levels of GPA, the variance of residuals increases. A model testing the association of the binary honor society membership variable with in-degree also shows some heteroscedasticity. Left unmodified, heteroscedasticity will produce a somewhat inefficient estimate of regression coefficients. A log transformation is the standard way to solve a probelm with heteroscedasticity. Unfortunately, I could not figure out how to log in-degree without dropping the large number of zero values for that variable. A test model with only the GPA variable logged does not seem to reduce heteroscedasticity compared to the un-logged model.
+
+```{r Test for multicollinearity}
 model.vif <- lm(indegree~pseudoGPA+honorsociety+nsports+race+sex+grade+alcoholuse+smoker+bandchoir+academicclub+parentinc, data=addhealth)
 vif(model.vif)
+```
 
+## Testing for multicollinearity
+Multicollinearity occurs when there is a moderate to high degree of correlation between the independent variables in a model. This increases standard errors and makes coefficient estimates unstable among different combinations of independent variables in a model. Multicollinearity between independent variables can be tested with a VIF (variance inflation factor) measure.
 VIF (variance inflation factor) applied to a test model with all variables shows low values for all the variables in this dataset. All VIF values are well below 4, indicating that there is no problem with multicollinearity between these variables.
-```
-```{r remove zeroes in parentinc}
-addhealth$parentinc[addhealth$parentinc=="0"]=1
 
-```
-Because some values for parental income are marked as 0, and because parental income values increase nonlinearly, I apply a cube-root transformation.
 
-``` {r Survey design}
+```{r Check and impute}
+sum(is.na(addhealth))
+sum(is.na(addhealth$parentinc))
+imputations <- mice(addhealth, 5, printFlag=FALSE)
+```
+
+## Testing for missing values, multiple imputations used to remedy
+
+There are 1027 missing values in the parent income variable, and 1235 total missing values in the dataset (the remaining missing values are found in the student grade variable). Income measures are notorious for missing value problems. To correct for this, I use multiple imputation chained equations, a non-parametric matching method which generates and imputes plausible values for all variables with missing values. Five rounds of imputation are used to minimize imputation variability issues.
+
+## Testing for survey design effects
+
+Survey design effects need to be adjusted for to ensure representative statistics and accurate statistical inference. To mitigate design effects, this analysis uses the 'cluster' and 'weight' values included in the Add Health dataset as arguments to the 'svyglm' command in R. 
+
+
+``` {r Test for survey design effects}
 lm_svy_mi <- function(formula, imputations) {
   
   #setting up null objects allows us to easily add results
@@ -84,7 +110,7 @@ lm_svy_mi <- function(formula, imputations) {
   
   #lets take the mean R2 value
   r.squared <- mean(R2)
-  #we can also grap n and p from the last model since 
+  #we can also grab n and p from the last model since 
   #they should be the same across all iterations
   n <- nobs(model)
   p <- length(model$coefficients)-1
@@ -110,35 +136,31 @@ convertModel <- function(model) {
 }
 ```
 
-```{r Multiple imputation, echo=FALSE}
-imputations <- mice(addhealth, 5, printFlag=FALSE)
-```
 
-```{r Models, results="asis", echo=FALSE, error=FALSE, message=FALSE}
+## Model selection
+
+Five OLS models were selected. 
+
+```{r Models, include=TRUE}
 # change these to focus on pseudoGPA, not income
 model1 <- lm_svy_mi(indegree~pseudoGPA, imputations)
 model2 <- lm_svy_mi(indegree~pseudoGPA+honorsociety, imputations)
-model3 <- lm_svy_mi(indegree~pseudoGPA+honorsociety+log(parentinc), imputations)
-model4 <- lm_svy_mi(indegree~log(parentinc)+nsports+pseudoGPA, imputations)
-model5 <- lm_svy_mi(indegree~log(parentinc)+nsports+pseudoGPA+honorsociety+sex, imputations)
+model3 <- lm_svy_mi(indegree~pseudoGPA+honorsociety+parentinc, imputations)
+model4 <- lm_svy_mi(indegree~parentinc+nsports+pseudoGPA, imputations)
+model5 <- lm_svy_mi(indegree~parentinc+nsports+pseudoGPA+honorsociety+sex, imputations)
 screenreg(lapply(list(model1, model2, model3, model4, model5), convertModel),
-       caption="OLS regression models predicting number of friend nominations received", custom.coef.names = c("Intercept","pseudo-GPA","member of honor society","parental income (logged)","number of sports played","male"),
+       caption="OLS regression models predicting number of friend nominations received", custom.coef.names = c("Intercept","pseudo-GPA","member of honor society","parental income","number of sports played","male"),
        caption.above = TRUE)
 ```
 
 
-
-```{r figure_example, echo=FALSE, fig.cap="A Lovely Caption Goes Here"}
-boxplot(indegree~nsports, data=addhealth, las=1, 
-        col="skyblue", xlab="Number of sports played",
-        ylab="Number of friend nominations")
-```
-
-# findings
+# Findings and analysis
 
 The OLS regression models show that adolescent popularity is
 
-# evaluate each model with adjusted R^2, F statistics, and BIC
+* no significant multicollinearity between honor society and pseudoGPA
+
+Evaluate each model with adjusted R^2, F statistics, and BIC
 • higher R2 good, higher F good, lower BIC good
 
 All models display negative BIC values, indicating goodness of fit for each.
